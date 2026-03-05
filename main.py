@@ -6,6 +6,10 @@ from pydantic import BaseModel
 import geojson
 from typing import Optional, Dict, Any, List, Union
 from datetime import datetime
+import json
+import os
+import motor.motor_asyncio
+import certifi
 
 app = FastAPI(title="NOTAM Visualizer API")
 
@@ -20,15 +24,14 @@ app.add_middleware(
 class NotamRequest(BaseModel):
     raw_text: str
 
-import json
-import os
-
 # Base directory
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# In-memory store for parsed features
-notam_features = []
-last_updated = datetime.now().isoformat()
+# Setup MongoDB
+MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://spoonerk1_db:Gasanime+Mon1526@cluster0.0ncpsnw.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
+client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI, tlsCAFile=certifi.where())
+db = client.notam_db
+notam_collection = db.notams
 
 def load_fir_boundaries():
     fir_file = os.path.join(BASE_DIR, 'fir_boundaries.json')
@@ -77,14 +80,22 @@ def nm_to_meters(nm: float) -> float:
     return nm * 1852.0
 
 @app.get("/api/notams")
-def get_notams():
-    """Retrieve all parsed NOTAM features as a GeoJSON FeatureCollection."""
-    fc = geojson.FeatureCollection(notam_features)
-    fc["last_updated"] = last_updated
-    return fc
+async def get_notams():
+    """Return stored NOTAMs as a GeoJSON FeatureCollection."""
+    features = []
+    cursor = notam_collection.find({}, {"_id": 0})
+    async for document in cursor:
+        features.append(document)
+        
+    global last_updated
+    return {
+        "type": "FeatureCollection",
+        "features": features,
+        "last_updated": last_updated
+    }
 
 @app.post("/api/notams")
-def add_notam(request: NotamRequest):
+async def add_notam(request: NotamRequest):
     """Parse a new NOTAM and add it to the state."""
     global last_updated
     text = request.raw_text.upper().replace('\n', ' ')
@@ -195,33 +206,35 @@ def add_notam(request: NotamRequest):
         
     feature = geojson.Feature(geometry=geometry, properties=properties)
     
-    # Add to our state
-    notam_features.append(feature)
+    # Drop _id before inserting to avoid type issues with geojson if needed, but not required
+    # Create the dict representation of the feature
+    feature_dict = dict(feature)
+    
+    # Check if this NOTAM already exists and replace, or insert new
+    await notam_collection.replace_one({"properties.id": notam_id}, feature_dict, upsert=True)
+    
     last_updated = datetime.now().isoformat()
     
     return {"status": "success", "message": f"Added NOTAM ID {notam_id}"}
 
 @app.delete("/api/notams")
-def clear_notams():
+async def clear_notams():
     """Clear all stored NOTAMs."""
     global last_updated
-    notam_features.clear()
+    await notam_collection.delete_many({})
     last_updated = datetime.now().isoformat()
     return {"status": "success", "message": "All NOTAMs cleared."}
 
 @app.delete("/api/notams/{notam_id}")
-def delete_notam(notam_id: str):
+async def delete_notam(notam_id: str):
     """Delete a specific NOTAM by ID."""
-    global notam_features, last_updated
-    # We replace the global list filtering out the matching NOTAM id.
-    # Note: Using replace to handle the `notam_features.remove()` cleanly based on properties mapping
-    # Note we keep all except the requested notam_id
-    initial_length = len(notam_features)
-    # Check id by taking properties safely
-    notam_features = [f for f in notam_features if f.properties.get("id") and f.properties.get("id").replace("/", "_") != notam_id.replace("/", "_")]
+    global last_updated
     
-    if len(notam_features) < initial_length:
+    # Remove from MongoDB
+    result = await notam_collection.delete_one({"properties.id": notam_id})
+    
+    if result.deleted_count > 0:
         last_updated = datetime.now().isoformat()
         return {"status": "success", "message": f"NOTAM {notam_id} deleted."}
     else:
-        raise HTTPException(status_code=404, detail=f"NOTAM {notam_id} not found.")
+        raise HTTPException(status_code=404, detail=f"NOTAM ID {notam_id} not found.")
