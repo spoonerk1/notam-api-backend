@@ -28,7 +28,7 @@ class NotamRequest(BaseModel):
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Setup MongoDB
-MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://spoonerk1_db:Gasanime+Mon1526@cluster0.0ncpsnw.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://spoonerk1_db:Gasanime%2BMon1526@cluster0.0ncpsnw.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
 client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI, tlsCAFile=certifi.where())
 db = client.notam_db
 notam_collection = db.notams
