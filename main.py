@@ -32,6 +32,7 @@ MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://spoonerk1_db:Gasanime%2BMon152
 client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI, tlsCAFile=certifi.where())
 db = client.notam_db
 notam_collection = db.notams
+last_updated = datetime.now().isoformat()
 
 def load_fir_boundaries():
     fir_file = os.path.join(BASE_DIR, 'fir_boundaries.json')
