@@ -226,7 +226,7 @@ async def clear_notams():
     last_updated = datetime.now().isoformat()
     return {"status": "success", "message": "All NOTAMs cleared."}
 
-@app.delete("/api/notams/{notam_id}")
+@app.delete("/api/notams/{notam_id:path}")
 async def delete_notam(notam_id: str):
     """Delete a specific NOTAM by ID."""
     global last_updated
