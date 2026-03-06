@@ -107,9 +107,9 @@ async def add_notam(request: NotamRequest):
     
     # 2. Time limits
     start_match = re.search(r'B\)\s*(\d{10})', text)
-    end_match = re.search(r'C\)\s*(\d{10})', text)
+    end_match = re.search(r'C\)\s*(\d{10}(?:\s*EST)?|PERM)', text)
     start_time = start_match.group(1) if start_match else "UNKNOWN"
-    end_time = end_match.group(1) if end_match else "UNKNOWN"
+    end_time = end_match.group(1).strip() if end_match else "UNKNOWN"
     
     # 3. Item Q Parsing
     q_match = re.search(r'Q\)\s*(.+?)(?=\s*[A-Z]\)|$)', text)
