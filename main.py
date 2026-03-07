@@ -190,19 +190,26 @@ async def add_notam(request: NotamRequest):
         properties["type"] = "polygon"
         
     # Priority 2: FIR Fallback based on external JSON definitions
-    elif any(f"{fir_key} FIR" in text for fir_key in fir_boundaries_dict.keys()) or ("OTDF FIR" in text and "DOHA" in fir_boundaries_dict):
+    elif any(f"{fir_key} FIR" in text for fir_key in fir_boundaries_dict.keys()) or ("OTDF FIR" in text and "DOHA" in fir_boundaries_dict) or fir in ["UBBA"] or "BAKU FIR" in text:
         found_key = next((k for k in fir_boundaries_dict.keys() if f"{k} FIR" in text), None)
         if not found_key and "OTDF FIR" in text:
             found_key = "DOHA"
             
-        if found_key:
+        # Special logic for Baku Sectors
+        if fir == "UBBA" or "BAKU FIR" in text:
+            if "SECTOR SOUTH" in text and "BAKU_SOUTH" in fir_boundaries_dict:
+                found_key = "BAKU_SOUTH"
+            elif "BAKU" in fir_boundaries_dict:  # Fallback to whole Baku FIR if it existed
+                found_key = "BAKU"
+                
+        if found_key and found_key in fir_boundaries_dict:
             fir_data = fir_boundaries_dict[found_key]
             if fir_data['type'] == 'MultiPolygon':
                 geometry = geojson.MultiPolygon(fir_data['coordinates'])
             else:
                 geometry = geojson.Polygon(fir_data['coordinates'])
             properties["type"] = "polygon"
-            properties["item_e"] += f" ({found_key} FIR Boundary Extrapolated)"
+            properties["item_e"] += f" ({found_key} Boundary Extrapolated)"
     # Priority 3: Point with radius
     elif point_coord is not None and radius_nm > 0:
         geometry = geojson.Point(point_coord)
