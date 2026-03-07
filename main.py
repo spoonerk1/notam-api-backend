@@ -169,7 +169,8 @@ async def add_notam(request: NotamRequest):
         "end": end_time,
         "altitude": altitude,
         "item_e": e_text,
-        "type": "none"
+        "type": "none",
+        "is_partial": "PARTIALLY" in e_text.upper()
     }
     
     # Load FIR dictionaries dynamically to reflect updates
