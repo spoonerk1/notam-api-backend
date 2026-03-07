@@ -105,6 +105,10 @@ async def add_notam(request: NotamRequest):
     id_match = re.search(r'([A-Z]\d{4}/\d{2})', text)
     notam_id = id_match.group(1) if id_match else "UNKNOWN"
     
+    # FIR from Item A
+    fir_match = re.search(r'A\)\s*([A-Z]{4})', text)
+    fir = fir_match.group(1) if fir_match else "UNKNOWN"
+    
     # 2. Time limits
     start_match = re.search(r'B\)\s*(\d{10})', text)
     end_match = re.search(r'C\)\s*(\d{10}(?:\s*EST)?|PERM)', text)
@@ -165,6 +169,7 @@ async def add_notam(request: NotamRequest):
     geometry = None
     properties = {
         "id": notam_id,
+        "fir": fir,
         "start": start_time,
         "end": end_time,
         "altitude": altitude,
