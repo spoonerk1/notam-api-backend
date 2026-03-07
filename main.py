@@ -190,11 +190,26 @@ async def add_notam(request: NotamRequest):
         properties["type"] = "polygon"
         
     # Priority 2: FIR Fallback based on external JSON definitions
-    elif any(f"{fir_key} FIR" in text for fir_key in fir_boundaries_dict.keys()) or ("OTDF FIR" in text and "DOHA" in fir_boundaries_dict) or fir in ["UBBA"] or "BAKU FIR" in text:
+    elif any(f"{fir_key} FIR" in text for fir_key in fir_boundaries_dict.keys()) or ("OTDF FIR" in text and "DOHA" in fir_boundaries_dict) or fir in ["UBBA"] or "BAKU FIR" in text or fir != "UNKNOWN":
         found_key = next((k for k in fir_boundaries_dict.keys() if f"{k} FIR" in text), None)
         if not found_key and "OTDF FIR" in text:
             found_key = "DOHA"
             
+        # ICAO to Region name fallback mapping
+        icao_to_region = {
+            "OBBB": "BAHRAIN", "OIIX": "TEHRAN", "LTAA": "ANKARA", "LTBB": "ISTANBUL",
+            "ORBB": "BAGHDAD", "LLLL": "TEL-AVIV", "LLAD": "TEL-AVIV", "OJAC": "AMMAN",
+            "OKAC": "KUWAIT", "OLBA": "BEIRUT", "OOMM": "MUSCAT", "OTDF": "DOHA",
+            "OEJD": "JEDDAH", "OSTT": "DAMASCUS", "OMAE": "EMIRATES", "OYSN": "SANAA",
+            "UBBA": "BAKU"
+        }
+        
+        # If we didn't find the name in the text, but we have a valid FIR code from Item A
+        if not found_key and fir in icao_to_region:
+             mapped_region = icao_to_region[fir]
+             if mapped_region in fir_boundaries_dict:
+                 found_key = mapped_region
+                 
         # Special logic for Baku Sectors
         if fir == "UBBA" or "BAKU FIR" in text:
             if "SECTOR SOUTH" in text and "BAKU_SOUTH" in fir_boundaries_dict:
