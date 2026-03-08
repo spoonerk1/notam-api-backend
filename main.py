@@ -174,6 +174,7 @@ async def add_notam(request: NotamRequest):
     properties = {
         "id": notam_id,
         "notam_type": notam_type,
+        "created_at": datetime.utcnow().isoformat() + "Z", # Store creation time to hide badge after 12h
         "fir": fir,
         "start": start_time,
         "end": end_time,
