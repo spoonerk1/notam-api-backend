@@ -236,8 +236,29 @@ async def add_notam(request: NotamRequest):
         geometry = geojson.Point(point_coord)
         properties["radius_meters"] = nm_to_meters(radius_nm)
         properties["type"] = "circle"
+    # Priority 4: Waypoints found in text
     else:
-        raise HTTPException(status_code=400, detail="Could not extract Polygon or Circle coordinates from NOTAM.")
+        # Dictionary of known waypoints in the region
+        waypoints_db = {
+            "ULDUS": [51.0155556, 38.0022222],  # 380008N0510056E
+            "BATEV": [50.2361111, 38.1719444],  # 381019N0501410E
+            "LALDA": [49.7500000, 38.2722222],  # 381620N0494500E
+            "PARSU": [49.3025000, 39.4786111]   # 392843N0491809E
+        }
+        
+        found_waypoints = []
+        for wp_name, coord in waypoints_db.items():
+            if wp_name in text:
+                found_waypoints.append(coord)
+                
+        if len(found_waypoints) > 0:
+            if len(found_waypoints) == 1:
+                geometry = geojson.Point(found_waypoints[0])
+            else:
+                geometry = geojson.MultiPoint(found_waypoints)
+            properties["type"] = "waypoint"
+        else:
+            raise HTTPException(status_code=400, detail="Could not extract Polygon, Circle, or Waypoint coordinates from NOTAM.")
         
     feature = geojson.Feature(geometry=geometry, properties=properties)
     
