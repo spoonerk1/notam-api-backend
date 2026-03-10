@@ -205,15 +205,18 @@ async def add_notam(request: NotamRequest):
     
     found_primary = []
     found_alt = []
+    waypoint_details = []
     
     # Only search Waypoints if there's no Polygon (Polygon is most precise)
     if not (len(polygon_coords) >= 3):
         for wp_name, coord in primary_waypoints_db.items():
             if wp_name in text:
                 found_primary.append(coord)
+                waypoint_details.append({"name": wp_name, "type": "primary", "coords": coord})
         for wp_name, coord in alt_waypoints_db.items():
             if wp_name in text:
                 found_alt.append(coord)
+                waypoint_details.append({"name": wp_name, "type": "alt", "coords": coord})
 
     if len(polygon_coords) >= 3:
         # close the polygon if not closed
@@ -229,6 +232,8 @@ async def add_notam(request: NotamRequest):
         else:
             geometry = geojson.MultiPoint(all_found)
             
+        properties["waypoint_list"] = waypoint_details
+        
         # Distinguish type for frontend coloring
         if len(found_primary) > 0 and len(found_alt) == 0:
             properties["type"] = "waypoint"
