@@ -187,7 +187,34 @@ async def add_notam(request: NotamRequest):
     # Load FIR dictionaries dynamically to reflect updates
     fir_boundaries_dict = load_fir_boundaries()
     
-    # Priority 1: Polygon
+    # Priority 2: Waypoints found in text
+    primary_waypoints_db = {
+        "ULDUS": [51.0155556, 38.0022222],  # 380008N0510056E
+        "BATEV": [50.2361111, 38.1719444],  # 381019N0501410E
+        "LALDA": [49.7500000, 38.2722222],  # 381620N0494500E
+        "PARSU": [49.3025000, 39.4786111]   # 392843N0491809E
+    }
+    
+    alt_waypoints_db = {
+        "MATAL": [45.5008333, 40.7708333],  # 404615N0453003E
+        "MARAL": [51.4980556, 41.3627778],  # 412146N0512953E
+        "METKA": [51.4983333, 40.7261111],  # 404334N0512954E
+        "RODAR": [51.4969444, 40.4683333],  # 402806N0512949E
+        "LARGI": [51.4975000, 40.2725000]   # 401621N0512951E
+    }
+    
+    found_primary = []
+    found_alt = []
+    
+    # Only search Waypoints if there's no Polygon (Polygon is most precise)
+    if not (len(polygon_coords) >= 3):
+        for wp_name, coord in primary_waypoints_db.items():
+            if wp_name in text:
+                found_primary.append(coord)
+        for wp_name, coord in alt_waypoints_db.items():
+            if wp_name in text:
+                found_alt.append(coord)
+
     if len(polygon_coords) >= 3:
         # close the polygon if not closed
         if polygon_coords[0] != polygon_coords[-1]:
@@ -195,7 +222,22 @@ async def add_notam(request: NotamRequest):
         geometry = geojson.Polygon([polygon_coords])
         properties["type"] = "polygon"
         
-    # Priority 2: FIR Fallback based on external JSON definitions
+    elif len(found_primary) > 0 or len(found_alt) > 0:
+        all_found = found_primary + found_alt
+        if len(all_found) == 1:
+            geometry = geojson.Point(all_found[0])
+        else:
+            geometry = geojson.MultiPoint(all_found)
+            
+        # Distinguish type for frontend coloring
+        if len(found_primary) > 0 and len(found_alt) == 0:
+            properties["type"] = "waypoint"
+        elif len(found_alt) > 0 and len(found_primary) == 0:
+            properties["type"] = "waypoint_alt"
+        else:
+            properties["type"] = "waypoint_both"
+        
+    # Priority 3: FIR Fallback based on external JSON definitions
     elif any(f"{fir_key} FIR" in text for fir_key in fir_boundaries_dict.keys()) or ("OTDF FIR" in text and "DOHA" in fir_boundaries_dict) or fir in ["UBBA"] or "BAKU FIR" in text or fir != "UNKNOWN":
         found_key = next((k for k in fir_boundaries_dict.keys() if f"{k} FIR" in text), None)
         if not found_key and "OTDF FIR" in text:
@@ -231,34 +273,20 @@ async def add_notam(request: NotamRequest):
                 geometry = geojson.Polygon(fir_data['coordinates'])
             properties["type"] = "polygon"
             properties["item_e"] += f" ({found_key} Boundary Extrapolated)"
-    # Priority 3: Point with radius
+        # Priority 4: Point with radius
+        elif point_coord is not None and radius_nm > 0:
+            geometry = geojson.Point(point_coord)
+            properties["radius_meters"] = nm_to_meters(radius_nm)
+            properties["type"] = "circle"
+        else:
+            raise HTTPException(status_code=400, detail="Could not extract Polygon, Circle, or Waypoint coordinates from NOTAM.")
+    # Priority 4 fallback if FIR logic ran but didn't find key
     elif point_coord is not None and radius_nm > 0:
         geometry = geojson.Point(point_coord)
         properties["radius_meters"] = nm_to_meters(radius_nm)
         properties["type"] = "circle"
-    # Priority 4: Waypoints found in text
     else:
-        # Dictionary of known waypoints in the region
-        waypoints_db = {
-            "ULDUS": [51.0155556, 38.0022222],  # 380008N0510056E
-            "BATEV": [50.2361111, 38.1719444],  # 381019N0501410E
-            "LALDA": [49.7500000, 38.2722222],  # 381620N0494500E
-            "PARSU": [49.3025000, 39.4786111]   # 392843N0491809E
-        }
-        
-        found_waypoints = []
-        for wp_name, coord in waypoints_db.items():
-            if wp_name in text:
-                found_waypoints.append(coord)
-                
-        if len(found_waypoints) > 0:
-            if len(found_waypoints) == 1:
-                geometry = geojson.Point(found_waypoints[0])
-            else:
-                geometry = geojson.MultiPoint(found_waypoints)
-            properties["type"] = "waypoint"
-        else:
-            raise HTTPException(status_code=400, detail="Could not extract Polygon, Circle, or Waypoint coordinates from NOTAM.")
+        raise HTTPException(status_code=400, detail="Could not extract Polygon, Circle, or Waypoint coordinates from NOTAM.")
         
     feature = geojson.Feature(geometry=geometry, properties=properties)
     
