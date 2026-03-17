@@ -84,7 +84,7 @@ def nm_to_meters(nm: float) -> float:
 async def get_notams():
     """Return stored NOTAMs as a GeoJSON FeatureCollection."""
     features = []
-    cursor = notam_collection.find({}, {"_id": 0})
+    cursor = notam_collection.find({}, {"_id": 0}).sort([("_id", -1)])
     async for document in cursor:
         features.append(document)
         
