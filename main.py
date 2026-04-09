@@ -171,6 +171,20 @@ async def add_notam(request: NotamRequest):
                 polygon_coords.append([plng, plat])
                 
     geometry = None
+    
+    # Detect "open airspace" NOTAMs
+    e_upper = e_text.upper()
+    open_keywords = [
+        "IS OPEN FOR OPERATIONS",
+        "IS OPEN FOR OVERFLIGHT",
+        "FIR IS OPEN",
+        "AIRSPACE IS OPEN",
+        "OPEN FOR ALL OPERATIONS",
+        "AIRSPACE OPEN",
+        "IS OPEN FOR ALL",
+    ]
+    is_open = any(kw in e_upper for kw in open_keywords)
+    
     properties = {
         "id": notam_id,
         "notam_type": notam_type,
@@ -181,7 +195,8 @@ async def add_notam(request: NotamRequest):
         "altitude": altitude,
         "item_e": e_text,
         "type": "none",
-        "is_partial": "PARTIALLY" in e_text.upper()
+        "is_partial": "PARTIALLY" in e_upper,
+        "is_open": is_open
     }
     
     # Load FIR dictionaries dynamically to reflect updates
