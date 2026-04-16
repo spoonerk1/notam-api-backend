@@ -259,10 +259,8 @@ async def add_notam(request: NotamRequest):
         
     # Priority 3: FIR Fallback based on external JSON definitions
     elif any(f"{fir_key} FIR" in text for fir_key in fir_boundaries_dict.keys()) or ("OTDF FIR" in text and "DOHA" in fir_boundaries_dict) or fir in ["UBBA"] or "BAKU FIR" in text or fir != "UNKNOWN":
-        found_key = next((k for k in fir_boundaries_dict.keys() if f"{k} FIR" in text), None)
-        if not found_key and "OTDF FIR" in text:
-            found_key = "DOHA"
-            
+        found_key = None
+
         # ICAO to Region name fallback mapping
         icao_to_region = {
             "OBBB": "BAHRAIN", "OIIX": "TEHRAN", "LTAA": "ANKARA", "LTBB": "ISTANBUL",
@@ -271,14 +269,29 @@ async def add_notam(request: NotamRequest):
             "OEJD": "JEDDAH", "OSTT": "DAMASCUS", "OMAE": "EMIRATES", "OYSN": "SANAA",
             "UBBA": "BAKU"
         }
-        
-        # If we didn't find the name in the text, but we have a valid FIR code from Item A
-        if not found_key and fir in icao_to_region:
-             mapped_region = icao_to_region[fir]
-             if mapped_region in fir_boundaries_dict:
-                 found_key = mapped_region
-                 
-        # Special logic for Baku Sectors
+
+        # --- Priority A: Item A ICAO code (most authoritative) ---
+        if fir in icao_to_region:
+            mapped_region = icao_to_region[fir]
+            if mapped_region in fir_boundaries_dict:
+                found_key = mapped_region
+
+        # --- Priority B: OTDF alias ---
+        if not found_key and "OTDF FIR" in text:
+            found_key = "DOHA"
+
+        # --- Priority C: Free-text scan (last resort, avoids false positives) ---
+        # Only run if Item A lookup failed, and restrict to matching the *subject* FIR
+        # by looking for the FIR name in the first ~300 characters of Item E.
+        if not found_key:
+            e_head = e_text[:300]
+            found_key = next((k for k in fir_boundaries_dict.keys() if f"{k} FIR" in e_head), None)
+
+        # If the subject-heading scan still fails, widen to full text as last resort
+        if not found_key:
+            found_key = next((k for k in fir_boundaries_dict.keys() if f"{k} FIR" in text), None)
+
+        # --- Special logic for Baku Sectors ---
         if fir == "UBBA" or "BAKU FIR" in text:
             if "SECTOR SOUTH" in text and "BAKU_SOUTH" in fir_boundaries_dict:
                 found_key = "BAKU_SOUTH"
