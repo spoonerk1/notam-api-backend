@@ -195,14 +195,27 @@ async def add_notam(request: NotamRequest):
         "altitude": altitude,
         "item_e": e_text,
         "type": "none",
-        "is_partial": "PARTIALLY" in e_upper,
+        "is_partial": "PARTIALLY" in e_upper or "WEST PART" in e_upper or "EAST PART" in e_upper or "PART REMAINS CLOSED" in e_upper,
         "is_open": is_open
     }
     
     # Load FIR dictionaries dynamically to reflect updates
     fir_boundaries_dict = load_fir_boundaries()
     
-    # Priority 2: Waypoints found in text
+    # Priority 1.5: Dividing Line Waypoints (e.g. partial FIR closure with a named dividing line)
+    # These waypoints define a line that splits an FIR into open/closed parts.
+    # Ordered dict: the sequence matters for drawing the line correctly.
+    dividing_line_db = {
+        # Tehran FIR partial closure dividing line (NOTAM A0751/26 pattern)
+        "IVIVA": [57.8272222, 25.0025000],  # 250009N0574938E  [lng, lat]
+        "PURBO": [56.9725000, 31.2347222],  # 311405N0565821E
+        "ANK":   [53.7275000, 33.5408333],  # 333227N0534339E
+        "OBRIX": [52.1422222, 34.7633333],  # 344548N0520832E
+        "NAGMO": [51.3463889, 36.0383333],  # 360218N0512047E
+        "LALDA": [49.7500000, 38.2722222],  # 381620N0494500E (also in primary_waypoints_db)
+    }
+    
+    # Priority 2: Regular Waypoints found in text
     primary_waypoints_db = {
         "ULDUS": [51.0155556, 38.0022222],  # 380008N0510056E
         "BATEV": [50.2361111, 38.1719444],  # 381019N0501410E
@@ -218,12 +231,19 @@ async def add_notam(request: NotamRequest):
         "LARGI": [51.4975000, 40.2725000]   # 401621N0512951E
     }
     
+    # Check for dividing line pattern first (only if no polygon coords found)
+    found_dividing = []  # list of {name, coord} in order they appear in text
+    if not (len(polygon_coords) >= 3):
+        for wp_name, coord in dividing_line_db.items():
+            if wp_name in text:
+                found_dividing.append({"name": wp_name, "coords": coord})
+    
     found_primary = []
     found_alt = []
     waypoint_details = []
     
-    # Only search Waypoints if there's no Polygon (Polygon is most precise)
-    if not (len(polygon_coords) >= 3):
+    # Only search regular Waypoints if there's no Polygon AND no dividing line
+    if not (len(polygon_coords) >= 3) and len(found_dividing) < 2:
         for wp_name, coord in primary_waypoints_db.items():
             if wp_name in text:
                 found_primary.append(coord)
@@ -239,6 +259,13 @@ async def add_notam(request: NotamRequest):
             polygon_coords.append(polygon_coords[0])
         geometry = geojson.Polygon([polygon_coords])
         properties["type"] = "polygon"
+
+    elif len(found_dividing) >= 2:
+        # Dividing line: draw as LineString through the matched waypoints (in order from db)
+        line_coords = [wp["coords"] for wp in found_dividing]  # already [lng, lat]
+        geometry = geojson.LineString(line_coords)
+        properties["type"] = "dividing_line"
+        properties["dividing_waypoints"] = found_dividing
         
     elif len(found_primary) > 0 or len(found_alt) > 0:
         all_found = found_primary + found_alt
