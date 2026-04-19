@@ -336,7 +336,9 @@ async def add_notam(request: NotamRequest):
                         
                         part_props = dict(properties)  # copy base properties
                         part_props["type"] = "polygon"
-                        part_props["is_partial"] = True
+                        # Closed side = RED (is_partial=False, is_open=False)
+                        # Open side = GREEN (is_open=True)
+                        part_props["is_partial"] = False
                         part_props["is_open"] = not side_closed
                         part_props["item_e"] = side_label + "\n" + e_text
                         part_props["fir_side"] = "west" if is_west else "east"
