@@ -350,6 +350,23 @@ async def add_notam(request: NotamRequest):
         split_features.append(geojson.Feature(
             geometry=geojson.MultiPoint(wp_coords), properties=wp_props))
 
+        # Airport markers feature (airports named in this NOTAM)
+        airport_names = ["OMAA", "OMAL", "OMAD", "OMFJ", "OMDB", "OMDW", "OMSJ", "OMRK"]
+        airport_labels = {
+            "OMAA": "OMAA\nAbu Dhabi", "OMAL": "OMAL\nAl Ain",
+            "OMAD": "OMAD\nAl Bateen", "OMFJ": "OMFJ\nFujairah",
+            "OMDB": "OMDB\nDubai Int'l", "OMDW": "OMDW\nAl Maktoum",
+            "OMSJ": "OMSJ\nSharjah", "OMRK": "OMRK\nRas Al Khaimah"
+        }
+        airport_list = [{"name": n, "label": airport_labels[n], "coords": em_wp[n]} for n in airport_names]
+        ap_coords = [ap["coords"] for ap in airport_list]
+        ap_props = dict(properties)
+        ap_props["type"] = "notam_airports"
+        ap_props["airport_list"] = airport_list
+        ap_props["item_e"] = "Emirates FIR - Affected Airports"
+        split_features.append(geojson.Feature(
+            geometry=geojson.MultiPoint(ap_coords), properties=ap_props))
+
 
     elif len(found_dividing) >= 2:
         # Dividing line: split the FIR polygon into closed/open halves
