@@ -263,6 +263,94 @@ async def add_notam(request: NotamRequest):
         geometry = geojson.Polygon([polygon_coords])
         properties["type"] = "polygon"
 
+    elif fir == "OMAE" and "PARTIALLY CLOSED" in e_upper:
+        # Priority 2.5: Emirates FIR partial closure with permitted route corridors
+        em_wp = {
+            "ITRAX": [55.7975,  24.21583], "SODEX": [55.52778, 23.83556],
+            "RIBOT": [52.40722, 23.15056], "TANSU": [54.47528, 22.69583],
+            "PEKEM": [53.99583, 22.78500], "KUPRO": [52.58472, 25.13972],
+            "LABRI": [55.64306, 24.06861], "RETAS": [55.64250, 24.06528],
+            "TOVOX": [52.40306, 24.89750], "LALDO": [56.59389, 25.30917],
+            "MENSA": [56.54222, 24.96639], "TONVO": [56.52861, 25.09083],
+            "TAPRA": [56.63194, 24.44028], "PASOV": [56.83889, 24.65111],
+            "MUSAP": [55.87861, 24.30194], "TARDI": [56.14944, 24.57778],
+            "ULBIS": [55.24944, 22.86861], "LUDID": [55.29694, 23.04444],
+            "BUNDU": [52.48694, 25.01417],
+            "OMAA":  [54.64778, 24.43556], "OMAL":  [55.61000, 24.26667],
+            "OMAD":  [54.45583, 24.43083], "OMFJ":  [56.31806, 25.11333],
+            "OMDB":  [55.36111, 25.25778], "OMDW":  [55.17361, 24.92083],
+            "OMSJ":  [55.51139, 25.33528], "OMRK":  [55.93694, 25.61583],
+        }
+        def c(name): return em_wp[name]
+
+        # Arrival route corridors (toward airports)
+        arrival_lines = [
+            [c("ITRAX"),c("SODEX"),c("RIBOT"),c("TANSU"),c("PEKEM"),c("KUPRO"),c("OMAA")],
+            [c("ITRAX"),c("SODEX"),c("RIBOT"),c("TANSU"),c("PEKEM"),c("KUPRO"),c("OMAL")],
+            [c("ITRAX"),c("SODEX"),c("RIBOT"),c("TANSU"),c("PEKEM"),c("KUPRO"),c("OMAD")],
+            [c("MENSA"),c("RIBOT"),c("TANSU"),c("PEKEM"),c("OMFJ")],
+            [c("TAPRA"),c("PASOV"),c("MUSAP"),c("RIBOT"),c("TANSU"),c("PEKEM"),c("OMDB")],
+            [c("TAPRA"),c("PASOV"),c("MUSAP"),c("RIBOT"),c("TANSU"),c("PEKEM"),c("OMDW")],
+            [c("TAPRA"),c("PASOV"),c("MUSAP"),c("RIBOT"),c("TANSU"),c("PEKEM"),c("OMSJ")],
+            [c("TAPRA"),c("PASOV"),c("MUSAP"),c("RIBOT"),c("TANSU"),c("PEKEM"),c("OMRK")],
+        ]
+        # Departure route corridors (away from airports)
+        departure_lines = [
+            [c("OMAA"),c("LABRI"),c("RETAS"),c("RIBOT"),c("TOVOX")],
+            [c("OMAL"),c("LABRI"),c("RETAS"),c("RIBOT"),c("TOVOX")],
+            [c("OMAD"),c("LABRI"),c("RETAS"),c("RIBOT"),c("TOVOX")],
+            [c("OMFJ"),c("TONVO"),c("RIBOT")],
+            [c("OMDB"),c("TARDI"),c("ULBIS"),c("RIBOT"),c("LALDO")],
+            [c("OMDW"),c("TARDI"),c("ULBIS"),c("RIBOT"),c("LALDO")],
+            [c("OMSJ"),c("TARDI"),c("ULBIS"),c("RIBOT"),c("LALDO")],
+            [c("OMRK"),c("TARDI"),c("ULBIS"),c("RIBOT"),c("LALDO")],
+            [c("BUNDU"),c("LABRI"),c("RETAS")],
+        ]
+
+        # Collect unique route waypoints (not airports) for marker display
+        route_wp_names = [
+            "ITRAX","SODEX","RIBOT","TANSU","PEKEM","KUPRO",
+            "LABRI","RETAS","TOVOX","LALDO","MENSA","TONVO",
+            "TAPRA","PASOV","MUSAP","TARDI","ULBIS","LUDID","BUNDU"
+        ]
+        wp_list = [{"name": n, "coords": em_wp[n]} for n in route_wp_names]
+
+        # Load FIR polygon for Emirates
+        fir_bd = load_fir_boundaries()
+        em_fir_data = fir_bd.get("EMIRATES")
+        fir_props = dict(properties)
+        fir_props["type"] = "polygon"
+        fir_props["is_partial"] = True
+        fir_props["is_open"] = False
+        fir_props["item_e"] = "EMIRATES FIR (PARTIALLY CLOSED)\n" + e_text
+        if em_fir_data:
+            fir_geom = geojson.Polygon(em_fir_data["coordinates"])
+            split_features.append(geojson.Feature(geometry=fir_geom, properties=fir_props))
+
+        # Arrival corridors feature
+        arr_props = dict(properties)
+        arr_props["type"] = "arrival_corridor"
+        arr_props["item_e"] = "Permitted Arrival Routes"
+        split_features.append(geojson.Feature(
+            geometry=geojson.MultiLineString(arrival_lines), properties=arr_props))
+
+        # Departure corridors feature
+        dep_props = dict(properties)
+        dep_props["type"] = "departure_corridor"
+        dep_props["item_e"] = "Permitted Departure Routes"
+        split_features.append(geojson.Feature(
+            geometry=geojson.MultiLineString(departure_lines), properties=dep_props))
+
+        # Waypoint markers feature
+        wp_coords = [wp["coords"] for wp in wp_list]
+        wp_props = dict(properties)
+        wp_props["type"] = "route_waypoints"
+        wp_props["waypoint_list"] = wp_list
+        wp_props["item_e"] = "Emirates FIR Route Waypoints"
+        split_features.append(geojson.Feature(
+            geometry=geojson.MultiPoint(wp_coords), properties=wp_props))
+
+
     elif len(found_dividing) >= 2:
         # Dividing line: split the FIR polygon into closed/open halves
         line_coords = [wp["coords"] for wp in found_dividing]  # [lng, lat]
