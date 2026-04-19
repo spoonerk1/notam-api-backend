@@ -10,6 +10,8 @@ import json
 import os
 import motor.motor_asyncio
 import certifi
+from shapely.geometry import Polygon as ShapelyPolygon, LineString as ShapelyLineString, MultiPolygon as ShapelyMultiPolygon
+from shapely.ops import split
 
 app = FastAPI(title="NOTAM Visualizer API")
 
@@ -171,6 +173,7 @@ async def add_notam(request: NotamRequest):
                 polygon_coords.append([plng, plat])
                 
     geometry = None
+    split_features = []  # For dividing line cases that produce multiple features
     
     # Detect "open airspace" NOTAMs
     e_upper = e_text.upper()
@@ -261,11 +264,100 @@ async def add_notam(request: NotamRequest):
         properties["type"] = "polygon"
 
     elif len(found_dividing) >= 2:
-        # Dividing line: draw as LineString through the matched waypoints (in order from db)
-        line_coords = [wp["coords"] for wp in found_dividing]  # already [lng, lat]
-        geometry = geojson.LineString(line_coords)
-        properties["type"] = "dividing_line"
-        properties["dividing_waypoints"] = found_dividing
+        # Dividing line: split the FIR polygon into closed/open halves
+        line_coords = [wp["coords"] for wp in found_dividing]  # [lng, lat]
+        
+        # Determine which FIR to split based on Item A code
+        fir_boundaries_dict_local = load_fir_boundaries()
+        icao_to_region_local = {
+            "OBBB": "BAHRAIN", "OIIX": "TEHRAN", "LTAA": "ANKARA", "LTBB": "ISTANBUL",
+            "ORBB": "BAGHDAD", "LLLL": "TEL-AVIV", "LLAD": "TEL-AVIV", "OJAC": "AMMAN",
+            "OKAC": "KUWAIT", "OLBA": "BEIRUT", "OOMM": "MUSCAT", "OTDF": "DOHA",
+            "OEJD": "JEDDAH", "OSTT": "DAMASCUS", "OMAE": "EMIRATES", "OYSN": "SANAA",
+            "UBBA": "BAKU"
+        }
+        fir_region = icao_to_region_local.get(fir, None)
+        fir_poly_data = fir_boundaries_dict_local.get(fir_region) if fir_region else None
+        
+        split_features = []
+        
+        if fir_poly_data:
+            try:
+                # Build shapely polygon from FIR boundary
+                if fir_poly_data['type'] == 'MultiPolygon':
+                    fir_shapely = ShapelyMultiPolygon([ShapelyPolygon(ring) for ring in [coords[0] for coords in fir_poly_data['coordinates']]])
+                else:
+                    fir_shapely = ShapelyPolygon(fir_poly_data['coordinates'][0])
+                
+                # Extend the dividing line beyond FIR boundary so it cleanly cuts through
+                p_start = line_coords[0]
+                p_end = line_coords[-1]
+                # Extend start southward and end northward by ~5 degrees
+                dx_s = line_coords[1][0] - p_start[0]
+                dy_s = line_coords[1][1] - p_start[1]
+                ext_start = [p_start[0] - dx_s * 3, p_start[1] - dy_s * 3]
+                dx_e = p_end[0] - line_coords[-2][0]
+                dy_e = p_end[1] - line_coords[-2][1]
+                ext_end = [p_end[0] + dx_e * 3, p_end[1] + dy_e * 3]
+                
+                extended_line_coords = [ext_start] + line_coords + [ext_end]
+                cutting_line = ShapelyLineString(extended_line_coords)
+                
+                result_geoms = split(fir_shapely, cutting_line)
+                
+                if len(result_geoms.geoms) >= 2:
+                    # Determine west vs east by comparing centroid longitude
+                    parts = list(result_geoms.geoms)
+                    parts.sort(key=lambda p: p.centroid.x)  # lowest lng = west
+                    
+                    # Detect which side is closed from text
+                    west_closed = "WEST" in text and ("CLOSED" in text or "REMAINS CLOSED" in text)
+                    east_closed = "EAST" in text and ("CLOSED" in text or "REMAINS CLOSED" in text) and "WEST" not in text
+                    
+                    # More nuanced: if text says "EAST PART...RESUMED NORMAL" and "WEST PART REMAINS CLOSED"
+                    if "WEST PART REMAINS CLOSED" in text or "WEST PART" in text and "CLOSED" in text:
+                        west_closed = True
+                    if "EAST PART" in text and ("RESUMED" in text or "OPEN" in text or "NORMAL OPERATION" in text):
+                        east_closed = False
+                    
+                    for i, part_poly in enumerate(parts):
+                        is_west = (i == 0)  # sorted by lng, first = west
+                        
+                        if is_west:
+                            side_closed = west_closed
+                            side_label = f"{fir_region} FIR (WEST - {'CLOSED' if side_closed else 'OPEN'})"
+                        else:
+                            side_closed = east_closed if east_closed else False
+                            side_label = f"{fir_region} FIR (EAST - {'CLOSED' if side_closed else 'OPEN'})"
+                        
+                        # Convert shapely polygon back to GeoJSON coords
+                        ext_ring = list(part_poly.exterior.coords)
+                        part_geojson = geojson.Polygon([ext_ring])
+                        
+                        part_props = dict(properties)  # copy base properties
+                        part_props["type"] = "polygon"
+                        part_props["is_partial"] = True
+                        part_props["is_open"] = not side_closed
+                        part_props["item_e"] = side_label + "\n" + e_text
+                        part_props["fir_side"] = "west" if is_west else "east"
+                        
+                        split_features.append(geojson.Feature(geometry=part_geojson, properties=part_props))
+                    
+                    # Also add the dividing line itself as a visual overlay
+                    line_geojson = geojson.LineString(line_coords)
+                    line_props = dict(properties)
+                    line_props["type"] = "dividing_line"
+                    line_props["dividing_waypoints"] = found_dividing
+                    split_features.append(geojson.Feature(geometry=line_geojson, properties=line_props))
+                    
+            except Exception as e:
+                print(f"Warning: FIR split failed: {e}. Falling back to LineString.")
+        
+        if not split_features:
+            # Fallback: just draw the dividing line if polygon split failed
+            geometry = geojson.LineString(line_coords)
+            properties["type"] = "dividing_line"
+            properties["dividing_waypoints"] = found_dividing
         
     elif len(found_primary) > 0 or len(found_alt) > 0:
         all_found = found_primary + found_alt
@@ -348,6 +440,21 @@ async def add_notam(request: NotamRequest):
     else:
         raise HTTPException(status_code=400, detail="Could not extract Polygon, Circle, or Waypoint coordinates from NOTAM.")
         
+    # Handle multi-feature case (dividing line split into west/east polygons + line)
+    if split_features:
+        # Delete any existing features for this NOTAM
+        await notam_collection.delete_many({"properties.id": notam_id})
+        
+        # Insert each split feature separately with a sub-id
+        for idx, sf in enumerate(split_features):
+            sf_dict = dict(sf)
+            sf_dict["properties"]["id"] = notam_id  # keep same ID for grouping
+            sf_dict["properties"]["_split_index"] = idx
+            await notam_collection.insert_one(sf_dict)
+        
+        last_updated = datetime.now().isoformat()
+        return {"status": "success", "message": f"Added NOTAM ID {notam_id} (split into {len(split_features)} features)"}
+    
     feature = geojson.Feature(geometry=geometry, properties=properties)
     
     # Drop _id before inserting to avoid type issues with geojson if needed, but not required
